@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei",
+    "Segoe UI", sans-serif;
+}
+
+/* 长文阅读的排版：行距放宽，代码用等宽 */
+.prose-learn {
+  line-height: 1.75;
+}
+.prose-learn p {
+  margin: 0.6em 0;
+}
+.prose-learn h1,
+.prose-learn h2,
+.prose-learn h3 {
+  font-weight: 600;
+  margin: 1.1em 0 0.5em;
+  line-height: 1.4;
+}
+.prose-learn h2 {
+  font-size: 1.05rem;
+}
+.prose-learn h3 {
+  font-size: 0.98rem;
+}
+.prose-learn ul,
+.prose-learn ol {
+  margin: 0.6em 0;
+  padding-left: 1.4em;
+}
+.prose-learn ul {
+  list-style: disc;
+}
+.prose-learn ol {
+  list-style: decimal;
+}
+.prose-learn li {
+  margin: 0.25em 0;
+}
+.prose-learn code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  padding: 0.12em 0.35em;
+  border-radius: 0.25rem;
+  background: color-mix(in oklab, currentColor 9%, transparent);
+}
+.prose-learn pre {
+  margin: 0.8em 0;
+  padding: 0.85em 1em;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  background: color-mix(in oklab, currentColor 7%, transparent);
+  border: 1px solid color-mix(in oklab, currentColor 12%, transparent);
+}
+.prose-learn pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.82em;
+  line-height: 1.6;
+}
+.prose-learn blockquote {
+  margin: 0.7em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid color-mix(in oklab, currentColor 25%, transparent);
+  opacity: 0.85;
+}
+.prose-learn table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.92em;
+}
+.prose-learn th,
+.prose-learn td {
+  border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+.prose-learn hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid color-mix(in oklab, currentColor 15%, transparent);
+}
