@@ -17,6 +17,8 @@ import { METHOD_LABELS, STATUS_LABELS, type KnowledgePoint, type NodeStatus, typ
 import { ENTRY_QUESTION, ENTRY_REPORT } from "./entries.js";
 import { NOTE_SECTIONS, readNotes, writeNoteSection } from "./notes.js";
 import type { Workspace } from "./workspace.js";
+import type { VaultAccess } from "./vault-access.js";
+import { listLearnerNotesTool } from "./vault-tools.js";
 import { loadPrompt } from "./prompts.js";
 
 export interface TutorToolContext {
@@ -25,6 +27,8 @@ export interface TutorToolContext {
   session: Session;
   /** report_progress 会同步更新大纲里的状态，回调由 runtime 提供 */
   onStatusChange: (status: NodeStatus) => void;
+  /** 库访问。有它时导师才能读到学习者已有的相关笔记。 */
+  vault?: VaultAccess;
 }
 
 /**
@@ -66,12 +70,15 @@ export function buildTutorSystemPrompt(node: KnowledgePoint, learnerProfile: str
 }
 
 /** 新建一份只在导师会话里使用的工具注册表。规划师的工具不会出现在这里。 */
-export function createTutorRegistry(): ToolRegistry<TutorToolContext> {
-  return new Registry<TutorToolContext>()
+export function createTutorRegistry(hasVault: boolean): ToolRegistry<TutorToolContext> {
+  const registry = new Registry<TutorToolContext>()
     .register(saveNoteTool)
     .register(readNotesTool)
     .register(askLearnerTool)
     .register(reportProgressTool);
+
+  if (hasVault) registry.register(listLearnerNotesTool as never);
+  return registry;
 }
 
 const saveNoteTool: Tool<TutorToolContext> = {

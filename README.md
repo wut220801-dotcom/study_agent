@@ -70,6 +70,63 @@ DeepSeek V4 系列（以及 Claude 的扩展思考）**默认就会先思考再�
 
 两条路线本项目都支持。「测试连接」按钮会真的发一次请求验证 key、模型名、baseUrl，比聊了一轮才发现配错要省事。
 
+## Obsidian 插件
+
+同一个 agent，两种宿主：**网页版**（本仓库的服务端 + 前端）和 **Obsidian 插件**（`obsidian-plugin/`）。插件里 agent 完全跑在插件进程内——没有服务端、没有 HTTP、没有 SSE，一轮对话就是一次函数调用。
+
+### 安装
+
+```bash
+cd obsidian-plugin
+npm install
+npm run build
+```
+
+把 `main.js`、`manifest.json`、`styles.css` 三个文件复制到 `<你的库>/.obsidian/plugins/learn-agent/`，然后在 Obsidian 里 设置 → 第三方插件 → 启用 **Learn Agent**。
+
+> 改完代码要重载才生效：命令面板搜 **Reload app without noticing**… 准确说是 **Reload app without saving**。Obsidian 会缓存 `main.js`，不会热重载。
+
+### 界面
+
+左侧 ribbon 出现 🎓 图标，点它右栏弹出面板。面板左侧是一条**可伸缩的角色栏**（收起 44px，展开 200px），右侧是对话。
+
+角色分三类，都在同一个列表里：
+
+| 角色 | 来源 |
+|---|---|
+| 🧭 规划师 | 内置，管大纲与学习计划 |
+| 🎓 各知识点的导师 | 跟着大纲自动出现，规划师建了新节点这里就多一个 |
+| 📄 自定义角色 | 自己写名称、图标、系统提示 |
+
+**自定义角色**在展开的角色栏底部点「＋ 新增角色」。两个开关值得注意：
+
+- **自动附带当前笔记**：每轮把你正在看的笔记（连同选中的段落）附在消息前面。这是「总结当前内容」这类角色能好用的关键——不用先复制粘贴再描述「我在看哪篇」。
+- **允许查看笔记库**：给它看目录结构和按需读单篇的能力。**只读**，改不了你的笔记。
+
+### 和库的关系
+
+- **工作目录**：笔记写进库里哪个目录，可以在面板的齿轮里直接选或新建，不用进 Obsidian 设置
+- **能看笔记库**：agent 有 `list_vault_structure` / `read_vault_note` 这类工具，规划师设计大纲前会先看你库里已经积累了什么，让大纲和你既有的笔记脉络对得上
+- **只读**：agent 对库只有读权限（除了往工作目录写它自己的笔记）。同名且不是它生成的笔记一律跳过，不会覆盖你自己的内容
+
+### 目录结构
+
+```
+obsidian-plugin/
+  manifest.json          Obsidian 插件清单（标了仅桌面端）
+  esbuild.config.mjs     打包：obsidian/electron 外置、.md 当文本、utf8 编码
+  styles.css             全用 Obsidian 的 CSS 变量，自动跟随你的主题
+  src/
+    bootstrap.ts         在插件进程内装配 runtime
+    main.ts              ribbon / 命令 / 笔记写入
+    view.ts              右栏面板：角色栏 + 对话
+    role-list.ts         可伸缩角色列表 + 新增/编辑/删除弹窗
+    settings-form.ts     设置表单（面板内和设置页共用同一份）
+    vault.ts             VaultAccess 的 Obsidian 实现
+```
+
+插件复用主项目的 `src/core/` 与 `src/learn/`，一行没改——它们本来就不知道自己被谁调用。唯一需要适配的是提示词加载（打包后没有源码目录，见 `src/learn/prompts.ts` 的注入接缝）。
+
 ## 导出到 Obsidian
 
 在「设置」页填上库路径（填**能看到 `.obsidian` 的那一层**）和子文件夹名，就能把学习内容写进你的 Obsidian 库。**不需要装任何插件**——Obsidian 的库就是本地一个 markdown 文件夹，所以这里直接写文件。

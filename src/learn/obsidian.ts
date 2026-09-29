@@ -29,6 +29,16 @@ import type { Workspace } from "./workspace.js";
 const GENERATED_BY = "learn-agent";
 const MARKER_KEY = "generated_by";
 
+/**
+ * 这个文件是不是本工具生成的。
+ *
+ * 写入前必须问这一句：库里全是用户自己的笔记，同名文件静默覆盖是不可接受的损失。
+ * 插件侧（走 Obsidian vault API）和服务端侧（走 node:fs）共用同一个判断。
+ */
+export function isGeneratedFile(content: string): boolean {
+  return content.includes(`${MARKER_KEY}: ${GENERATED_BY}`);
+}
+
 export interface ObsidianSettings {
   /** Obsidian 库的绝对路径 */
   vaultPath?: string;
@@ -89,39 +99,19 @@ export function exportToObsidian(options: ExportOptions): ExportResult {
     return { ok: false, written: [], skipped: [], error: probe.error, exportedAt: Date.now() };
   }
 
-  const folder = sanitizeSegment(settings.folder?.trim() || DEFAULT_OBSIDIAN_FOLDER);
-  const targetDir = join(vaultPath, folder);
+  const folder = settings.folder?.trim() || DEFAULT_OBSIDIAN_FOLDER;
+  const files = renderVaultFiles(curriculum, workspace, folder);
 
   const written: string[] = [];
   const skipped: ExportSkip[] = [];
 
   try {
-    mkdirSync(targetDir, { recursive: true });
-
-    // 每个知识点一个文件
-    for (const node of curriculum.nodes) {
-      const filename = `${sanitizeSegment(node.id)} ${sanitizeSegment(node.title)}.md`;
-      const relative = join(folder, filename);
-      const body = renderNodeFile(node, curriculum, workspace);
-      if (writeGuarded(join(targetDir, filename), body, relative, skipped)) {
+    mkdirSync(targetDirFor(vaultPath, files), { recursive: true });
+    for (const [relative, content] of files) {
+      if (writeGuarded(join(vaultPath, relative), content, relative, skipped)) {
         written.push(relative);
       }
     }
-
-    // 索引文件。主题还没设定时用固定名，不要把「(尚未设定)」这种占位文案写进文件名。
-    const indexName = `${sanitizeSegment(indexTitle(curriculum))}.md`;
-    const indexPath = join(targetDir, indexName);
-    if (
-      writeGuarded(
-        indexPath,
-        renderIndexFile(curriculum, workspace),
-        join(folder, indexName),
-        skipped,
-      )
-    ) {
-      written.push(join(folder, indexName));
-    }
-
     return { ok: true, written, skipped, exportedAt: Date.now() };
   } catch (error) {
     return {
@@ -135,11 +125,49 @@ export function exportToObsidian(options: ExportOptions): ExportResult {
 }
 
 /**
+ * 渲染出所有要写进库的文件，**不碰磁盘**。
+ *
+ * 把渲染和写入分开，是因为写入方式取决于宿主：服务端用 node:fs，Obsidian 插件
+ * 必须用 `app.vault`——直接写盘的话 Obsidian 的文件索引不会更新，新建的笔记在
+ * 文件树里看不到，还可能跟同步打架。渲染逻辑只有一份，两边共用。
+ *
+ * @returns 相对库根的路径 → 文件内容
+ */
+export function renderVaultFiles(
+  curriculum: Curriculum,
+  workspace: Workspace,
+  folder: string,
+): Map<string, string> {
+  const safeFolder = sanitizeSegment(folder.trim() || DEFAULT_OBSIDIAN_FOLDER);
+  const files = new Map<string, string>();
+
+  for (const node of curriculum.nodes) {
+    const filename = `${sanitizeSegment(node.id)} ${sanitizeSegment(node.title)}.md`;
+    files.set(`${safeFolder}/${filename}`, renderNodeFile(node, curriculum, workspace));
+  }
+
+  // 索引文件。主题还没设定时用固定名，不要把「(尚未设定)」这种占位文案写进文件名。
+  const indexName = `${sanitizeSegment(indexTitle(curriculum))}.md`;
+  files.set(`${safeFolder}/${indexName}`, renderIndexFile(curriculum, workspace));
+
+  return files;
+}
+
+/**
  * 带保护的写入。
  *
  * 目标文件已存在且没有生成标记 → 跳过并记录冲突。这是这个模块里唯一真正重要的
  * 逻辑：用户库里可能有他自己的笔记恰好重名，静默覆盖是不可接受的损失。
  */
+/** 所有渲染结果所在的目录（取第一个文件的父目录）。 */
+function targetDirFor(vaultPath: string, files: Map<string, string>): string {
+  const first = files.keys().next().value as string | undefined;
+  if (!first) return vaultPath;
+  const parts = first.split("/");
+  parts.pop();
+  return join(vaultPath, ...parts);
+}
+
 function writeGuarded(
   absolutePath: string,
   content: string,
@@ -153,7 +181,7 @@ function writeGuarded(
     } catch {
       /* 读不了就当冲突处理，保守优先 */
     }
-    if (!existing.includes(`${MARKER_KEY}: ${GENERATED_BY}`)) {
+    if (!isGeneratedFile(existing)) {
       skipped.push({
         path: relativeForReport,
         reason: "同名文件已存在且不是本工具生成的，已跳过以免覆盖你自己的笔记",

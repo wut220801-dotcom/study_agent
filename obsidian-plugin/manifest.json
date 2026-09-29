@@ -1,0 +1,9 @@
+{
+  "id": "learn-agent",
+  "name": "Learn Agent",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "自带学习规划师与知识点导师的 agent。规划师维护大纲，导师负责逐个知识点的教学，两者上下文隔离。",
+  "author": "wut220801",
+  "isDesktopOnly": true
+}

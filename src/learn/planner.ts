@@ -30,6 +30,8 @@ import {
 } from "./curriculum.js";
 import { METHOD_LABELS, type Curriculum, type Method, type NodeStatus, type Report } from "./types.js";
 import type { Workspace } from "./workspace.js";
+import type { VaultAccess } from "./vault-access.js";
+import { listVaultStructureTool, readVaultNoteTool } from "./vault-tools.js";
 import { loadPrompt } from "./prompts.js";
 
 export interface PlannerToolContext {
@@ -42,6 +44,10 @@ export interface PlannerToolContext {
   dispatchTutor: (nodeId: string, instruction?: string) => Promise<string>;
   /** 大纲被改动后落盘 */
   saveCurriculum: () => void;
+  /** 库访问能力。服务端模式没有（agent 看不到库），此时相关工具不注册。 */
+  vault?: VaultAccess;
+  /** 工作目录（相对库根），库结构从这里开始列 */
+  workFolder: string;
 }
 
 /**
@@ -86,13 +92,22 @@ export function latestReportsByNode(curriculum: Curriculum, workspace: Workspace
   return map;
 }
 
-export function createPlannerRegistry(): Registry<PlannerToolContext> {
-  return new ToolRegistry<PlannerToolContext>()
+export function createPlannerRegistry(hasVault: boolean): Registry<PlannerToolContext> {
+  const registry = new ToolRegistry<PlannerToolContext>()
     .register(addKnowledgePointTool)
     .register(updateKnowledgePointTool)
     .register(dispatchTutorTool)
     .register(readReportsTool)
     .register(setLearningGoalTool);
+
+  // 只有在插件里（能访问库）才提供这两个工具。
+  // 服务端模式没有库可看，注册了反而会让模型调用一个必然失败的工具。
+  if (hasVault) {
+    // 这两个工具只需要 vault + workFolder，PlannerToolContext 天然满足
+    registry.register(listVaultStructureTool as never);
+    registry.register(readVaultNoteTool as never);
+  }
+  return registry;
 }
 
 const addKnowledgePointTool: Tool<PlannerToolContext> = {

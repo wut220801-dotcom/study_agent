@@ -13,7 +13,7 @@ import {
   type CompactionSettings,
 } from "../core/compaction.js";
 import type { Provider, ProviderConfig } from "../core/provider/types.js";
-import type { ToolRegistry } from "../core/tools/types.js";
+
 import { userText, type Message } from "../core/types.js";
 import { createProvider } from "../core/provider/index.js";
 import type { AppConfig } from "../config.js";
@@ -56,6 +56,36 @@ import {
   type ExportResult,
   type ObsidianSettings,
 } from "./obsidian.js";
+import type { VaultAccess } from "./vault-access.js";
+import {
+  buildCustomRolePrompt,
+  customRoleSessionId,
+  type CustomRole,
+} from "./roles.js";
+import { listVaultStructureTool, readVaultNoteTool } from "./vault-tools.js";
+import { ToolRegistry } from "../core/tools/types.js";
+
+/** 自定义角色的工具上下文：只需要能看库，不需要大纲和知识点。 */
+export interface CustomRoleToolContext {
+  vault?: VaultAccess;
+  workFolder?: string;
+}
+
+/**
+ * 自定义角色的工具表。
+ *
+ * 刻意**只给读的能力**：这类角色（总结、梳理、换个角度讲）本来就不该去改大纲、
+ * 也不该往导师的笔记里写东西。想让它产出内容，它写在回复里就行——用户自己决定
+ * 要不要落成笔记。这比给它写权限安全得多，也更容易理解。
+ */
+function createCustomRoleRegistry(hasVault: boolean): ToolRegistry<CustomRoleToolContext> {
+  const registry = new ToolRegistry<CustomRoleToolContext>();
+  if (hasVault) {
+    registry.register(listVaultStructureTool);
+    registry.register(readVaultNoteTool);
+  }
+  return registry;
+}
 
 export interface TurnHooks {
   emit?: (event: LoopEvent) => void;
@@ -94,6 +124,12 @@ export class LearningRuntime {
   private reasoning: Required<ReasoningSettings> = { ...DEFAULT_REASONING };
   private obsidian: ObsidianSettings = {};
   private lastExport: ExportResult | null = null;
+  /**
+   * 库访问能力，由宿主注入（插件用 app.vault，服务端不提供）。
+   * 它决定 planner / tutor 的工具表里有没有「看笔记库」这类工具。
+   */
+  private vaultAccess?: VaultAccess;
+  private workFolder = "学习Agent";
   private readonly sessions = new Map<string, Session>();
   private curriculum: Curriculum;
 
@@ -183,6 +219,12 @@ export class LearningRuntime {
   /** 从磁盘加载过的持久设置里恢复推理配置（config 在启动时已合并，这里只取推理部分） */
   reasoningSettings(): Required<ReasoningSettings> {
     return { ...this.reasoning };
+  }
+
+  /** 注入库访问能力。必须在第一次对话之前调用，因为工具表在每轮开始时构建。 */
+  setVaultAccess(access: VaultAccess | undefined, workFolder: string): void {
+    this.vaultAccess = access;
+    this.workFolder = workFolder;
   }
 
   obsidianSettings(): ObsidianSettings {
@@ -301,12 +343,14 @@ export class LearningRuntime {
       curriculum: this.curriculum,
       dispatchTutor: async (nodeId, instruction) => this.dispatch(nodeId, instruction),
       saveCurriculum: () => this.saveCurriculum(),
+      ...(this.vaultAccess ? { vault: this.vaultAccess } : {}),
+      workFolder: this.workFolder,
     };
 
     return this.runTurn({
       session,
       system: buildPlannerSystemPrompt(this.curriculum, latestReports),
-      registry: createPlannerRegistry(),
+      registry: createPlannerRegistry(Boolean(this.vaultAccess)),
       toolContext,
       message,
       reasoningEffort: this.reasoning.planner,
@@ -327,12 +371,44 @@ export class LearningRuntime {
         node.status = status;
         this.saveCurriculum();
       },
+      ...(this.vaultAccess ? { vault: this.vaultAccess } : {}),
     };
 
     return this.runTurn({
       session,
       system: buildTutorSystemPrompt(node, this.curriculum.learnerProfile),
-      registry: createTutorRegistry(),
+      registry: createTutorRegistry(Boolean(this.vaultAccess)),
+      toolContext,
+      message,
+      reasoningEffort: this.reasoning.tutor,
+      hooks,
+    });
+  }
+
+  /**
+   * 跑一轮自定义角色的对话。
+   *
+   * 和规划师/导师走的是同一套循环、同一套会话树、同一套压缩——差别只在系统提示
+   * 和工具表。所以自定义角色天然拥有持久会话、上下文压缩、撤销这些能力，不需要
+   * 为它单独实现一遍。
+   */
+  async runCustomRoleTurn(
+    role: CustomRole,
+    message: string,
+    hooks: TurnHooks = {},
+  ): Promise<LoopResult> {
+    const session = this.session(customRoleSessionId(role.id));
+    await this.compactIfNeeded(session);
+
+    const toolContext: CustomRoleToolContext = {
+      ...(this.vaultAccess ? { vault: this.vaultAccess } : {}),
+      workFolder: this.workFolder,
+    };
+
+    return this.runTurn({
+      session,
+      system: buildCustomRolePrompt(role, this.workFolder),
+      registry: createCustomRoleRegistry(Boolean(this.vaultAccess) && role.vaultAccess !== false),
       toolContext,
       message,
       reasoningEffort: this.reasoning.tutor,
@@ -357,6 +433,7 @@ export class LearningRuntime {
         node.status = status;
         this.saveCurriculum();
       },
+      ...(this.vaultAccess ? { vault: this.vaultAccess } : {}),
     };
 
     session.appendCustom(
@@ -374,7 +451,7 @@ export class LearningRuntime {
       provider: this.provider,
       system: buildTutorSystemPrompt(node, this.curriculum.learnerProfile),
       history: session.buildContext(),
-      registry: createTutorRegistry(),
+      registry: createTutorRegistry(Boolean(this.vaultAccess)),
       toolContext,
       maxIterations: this.maxIterations,
       maxTokens: this.maxOutputTokens,
